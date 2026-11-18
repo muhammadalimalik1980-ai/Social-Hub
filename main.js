@@ -20,17 +20,24 @@ const SITES = {
 let win, mode = 'rect', active = null, fit = true, scale = 1, selected = null;
 let adblock = true, blocker = null;
 
-// Google refuses sign-in from embedded Electron browsers, so only its sign-in pages get a Firefox identity.
-const FIREFOX_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0';
+// Google refuses sign-in from embedded Electron browsers. Its sign-in pages get the same
+// identity a real Chrome would send (user agent plus client hints); everything else is untouched.
 const chromeUA = () => app.userAgentFallback.replace(/ Electron\/\S+/, '').replace(/ [\w-]+\/\d[\w.]* (?=Chrome)/, ' ');
-const uaFor = url => /^https:\/\/accounts\.google\.com\//.test(url) ? FIREFOX_UA : chromeUA();
+const CH_MAJOR = process.versions.chrome.split('.')[0];
+const CH_UA = '"Chromium";v="' + CH_MAJOR + '", "Google Chrome";v="' + CH_MAJOR + '", "Not?A_Brand";v="99"';
+const GOOGLE_PRELOAD = path.join(__dirname, 'google-preload.js');
 
-app.on('web-contents-created', (_, wc) => {
-  const set = url => { const ua = uaFor(url); if (wc.getUserAgent() !== ua) wc.setUserAgent(ua); };
-  wc.on('will-navigate', (_e, url) => set(url));
-  wc.on('will-redirect', (_e, url) => set(url));
-  wc.on('did-create-window', (child, d) => child.webContents.setUserAgent(uaFor(d.url)));
-});
+function spoofGoogleHeaders(ses) {
+  ses.webRequest.onBeforeSendHeaders({ urls: ['https://accounts.google.com/*', 'https://accounts.youtube.com/*'] }, (d, cb) => {
+    const h = d.requestHeaders;
+    for (const k of Object.keys(h)) if (/^sec-ch-ua(-|$)/i.test(k) || /^user-agent$/i.test(k)) delete h[k];
+    h['User-Agent'] = chromeUA();
+    h['sec-ch-ua'] = CH_UA;
+    h['sec-ch-ua-mobile'] = '?0';
+    h['sec-ch-ua-platform'] = '"Windows"';
+    cb({ requestHeaders: h });
+  });
+}
 const TARGET = 1000; // CSS width every site is laid out at, so nothing is cut off
 const open = new Map(); // id -> { id, name, view }
 
@@ -96,10 +103,11 @@ function push() {
 }
 
 function openSite(id, name, url) {
-  const view = new WebContentsView({ webPreferences: { partition: 'persist:' + id, sandbox: true } });
+  const view = new WebContentsView({ webPreferences: { partition: 'persist:' + id, sandbox: true, preload: GOOGLE_PRELOAD } });
   const wc = view.webContents;
   wc.setUserAgent(chromeUA());
-  wc.setWindowOpenHandler(() => ({ action: 'allow' })); // keeps login popups working
+  try { spoofGoogleHeaders(wc.session); } catch (e) { report('Sign-in helper failed', e); }
+  wc.setWindowOpenHandler(() => ({ action: 'allow', overrideBrowserWindowOptions: { webPreferences: { sandbox: true, preload: GOOGLE_PRELOAD } } })); // keeps login popups working
   wc.on('dom-ready', () => { autoFit(); injectYT(wc); });
   wc.on('did-navigate', autoFit);
   wc.on('did-fail-load', (_e, code, desc, _u, isMain) => {

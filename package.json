@@ -17,6 +17,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "google-preload.js",
       "index.html",
       "node_modules/**/*"
     ],
