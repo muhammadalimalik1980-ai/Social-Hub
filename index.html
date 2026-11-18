@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
+<title>Social Hub</title>
+<style>
+  :root { --bg:#12151c; --panel:#1b2030; --line:#2b3248; --text:#e8ecf4; --dim:#8c95ad; --accent:#5b8cff; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--text);
+    font:13px/1.3 "Segoe UI Variable","Segoe UI",system-ui,sans-serif; user-select:none; }
+  #bar { height:56px; display:flex; align-items:center; gap:14px; padding:0 12px;
+    background:var(--panel); border-bottom:1px solid var(--line); overflow:hidden; }
+  .group { display:flex; gap:2px; padding:3px; background:var(--bg); border-radius:8px; }
+  button { font:inherit; color:var(--dim); background:none; border:0; border-radius:6px; padding:7px 10px; cursor:pointer; }
+  button:hover { color:var(--text); }
+  button:focus-visible, input:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+  .mode.on { background:var(--accent); color:#fff; }
+  #sites { display:flex; gap:6px; flex:1; overflow-x:auto; scrollbar-width:none; }
+  .chip { border:1px solid var(--line); border-radius:999px; padding:6px 12px; white-space:nowrap; }
+  .chip.on { border-color:var(--accent); color:var(--text); background:rgba(91,140,255,.14); }
+  .zoom { display:flex; align-items:center; gap:8px; color:var(--dim); white-space:nowrap; }
+  .zoom input { width:90px; accent-color:var(--accent); }
+  #zn { max-width:80px; overflow:hidden; text-overflow:ellipsis; }
+  #zv, #wzv { width:38px; text-align:right; }
+  #url { width:190px; background:var(--bg); border:1px solid var(--line); border-radius:8px; color:var(--text); padding:7px 10px; font:inherit; }
+  #side { position:fixed; top:56px; left:0; bottom:0; width:210px; padding:8px; display:none;
+    background:var(--panel); border-right:1px solid var(--line); overflow-y:auto; }
+  body.vertical #side { display:block; }
+  .tab { display:flex; align-items:center; justify-content:space-between; padding:9px 10px; border-radius:8px; cursor:pointer; color:var(--dim); }
+  .tab:hover { background:var(--bg); color:var(--text); }
+  .tab.on { background:var(--bg); color:var(--text); box-shadow:inset 3px 0 var(--accent); }
+  .tab b { font-weight:400; padding:0 6px; border-radius:4px; }
+  .tab b:hover { background:var(--line); }
+  #empty { padding:90px 24px; text-align:center; color:var(--dim); }
+  @media (prefers-reduced-motion:no-preference) { button, .tab { transition:background .12s, color .12s; } }
+</style>
+</head>
+<body>
+<div id="bar">
+  <div class="group" role="group" aria-label="Layout">
+    <button class="mode" data-m="rect">Rectangle</button>
+    <button class="mode" data-m="square">Square</button>
+    <button class="mode" data-m="columns">Columns</button>
+    <button class="mode" data-m="rows">Rows</button>
+    <button class="mode" data-m="focus">Focus</button>
+    <button class="mode" data-m="vertical">Vertical tabs</button>
+  </div>
+  <button id="fit" class="chip" title="Zoom each site so nothing is cut off">Auto-fit</button>
+  <button id="ads" class="chip" title="Block ads and trackers">Ad block</button>
+  <button id="pip" class="chip" title="Pop a video out into Picture-in-Picture (click again to close)">PiP</button>
+  <div id="sites"></div>
+  <label class="zoom" title="Click a site, then zoom only that one (double-click to reset)"><span id="zn">Window</span> <input type="range" id="wzoom" min="30" max="300" step="5" value="100" disabled><span id="wzv">100%</span></label>
+  <label class="zoom" title="Zoom all sites in or out (double-click to reset)">All <input type="range" id="zoom" min="50" max="200" step="5" value="100"><span id="zv">100%</span></label>
+  <input id="url" placeholder="Open any site" aria-label="Open any site">
+</div>
+<div id="side"></div>
+<div id="empty">Pick a site above to open it. Each site keeps its own login.</div>
+
+<script>
+  const $ = s => document.querySelector(s);
+  document.querySelectorAll('.mode').forEach(b => b.onclick = () => hub.setMode(b.dataset.m));
+  const zoom = $('#zoom');
+  const showZoom = () => $('#zv').textContent = zoom.value + '%';
+  zoom.oninput = () => { showZoom(); hub.setScale(zoom.value / 100); };
+  zoom.ondblclick = () => { zoom.value = 100; showZoom(); hub.setScale(1); };
+  const wz = $('#wzoom');
+  const showWz = () => $('#wzv').textContent = wz.value + '%';
+  wz.oninput = () => { showWz(); hub.setItemScale(wz.value / 100); };
+  wz.ondblclick = () => { wz.value = 100; showWz(); hub.setItemScale(1); };
+  $('#ads').onclick = () => hub.toggleAdblock();
+  $('#pip').onclick = () => hub.pip();
+  hub.onToast(m => {
+    const u = $('#url'), old = u.placeholder;
+    u.placeholder = m;
+    setTimeout(() => u.placeholder = old, 3000);
+  });
+  $('#fit').onclick = () => hub.toggleFit();
+  $('#url').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { hub.add(e.target.value); e.target.value = ''; }
+  });
+
+  hub.onState(s => {
+    document.body.classList.toggle('vertical', s.mode === 'vertical' || s.mode === 'focus');
+    document.querySelectorAll('.mode').forEach(b => b.classList.toggle('on', b.dataset.m === s.mode));
+    $('#fit').classList.toggle('on', s.fit);
+    $('#ads').classList.toggle('on', s.adblock);
+    zoom.value = Math.round(s.scale * 100); showZoom();
+    wz.disabled = !s.sel;
+    $('#zn').textContent = s.sel ? s.sel.name : 'Window';
+    wz.value = s.sel ? Math.round(s.sel.scale * 100) : 100; showWz();
+    $('#empty').style.display = s.tabs.length ? 'none' : 'block';
+
+    $('#sites').replaceChildren(...s.sites.map(x => {
+      const b = document.createElement('button');
+      b.className = 'chip' + (x.open ? ' on' : '');
+      b.textContent = x.name;
+      b.onclick = () => hub.toggle(x.id);
+      return b;
+    }));
+
+    $('#side').replaceChildren(...s.tabs.map(t => {
+      const d = document.createElement('div');
+      d.className = 'tab' + (t.id === s.active ? ' on' : '');
+      d.textContent = t.name;
+      d.onclick = () => hub.activate(t.id);
+      const x = document.createElement('b');
+      x.textContent = '×';
+      x.title = 'Close';
+      x.onclick = e => { e.stopPropagation(); hub.close(t.id); };
+      d.append(x);
+      return d;
+    }));
+  });
+</script>
+</body>
+</html>

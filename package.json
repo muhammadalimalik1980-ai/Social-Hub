@@ -1,0 +1,30 @@
+{
+  "name": "social-hub",
+  "version": "1.0.0",
+  "description": "Chromium-based social hub with rectangle, square and vertical tab layouts",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win portable"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.local.socialhub",
+    "productName": "Social Hub",
+    "files": [
+      "main.js",
+      "preload.js",
+      "index.html",
+      "node_modules/**/*"
+    ],
+    "win": {
+      "target": "portable"
+    }
+  },
+  "dependencies": {
+    "@ghostery/adblocker-electron": "^2.0.0"
+  }
+}
