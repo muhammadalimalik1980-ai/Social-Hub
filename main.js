@@ -61,9 +61,16 @@ function syncBlocking() {
   for (const o of open.values()) {
     const wc = o.view.webContents;
     if (wc.isDestroyed()) continue;
-    if (blocker) adblock ? blocker.enableBlockingInSession(wc.session) : blocker.disableBlockingInSession(wc.session);
+    try {
+      if (blocker) adblock ? blocker.enableBlockingInSession(wc.session) : blocker.disableBlockingInSession(wc.session);
+    } catch (e) { report('Ad block unavailable', e); }
     if (/youtube\.com/.test(wc.getURL())) wc.executeJavaScript(`window.__hubAdblock=${adblock}`).catch(() => {});
   }
+}
+
+function report(label, e) {
+  console.log(label, e);
+  if (win && !win.isDestroyed()) win.webContents.send('toast', label + ': ' + ((e && e.message) || e));
 }
 
 function push() {
@@ -83,7 +90,10 @@ function openSite(id, name, url) {
   wc.setWindowOpenHandler(() => ({ action: 'allow' })); // keeps login popups working
   wc.on('dom-ready', () => { autoFit(); injectYT(wc); });
   wc.on('did-navigate', autoFit);
-  wc.loadURL(url);
+  wc.on('did-fail-load', (_e, code, desc, _u, isMain) => {
+    if (isMain && code !== -3) report('Page failed to load', { message: desc + ' (' + code + ')' });
+  });
+  wc.loadURL(url).catch(() => {});
   win.contentView.addChildView(view);
   open.set(id, { id, name, view, scale: 1 });
   selected = id;
@@ -196,17 +206,19 @@ app.whenReady().then(() => {
   win.webContents.on('did-finish-load', refresh);
   win.on('resize', layout);
 
-  ipcMain.on('toggle', (_, id) => {
-    open.has(id) ? closeSite(id) : openSite(id, SITES[id].name, SITES[id].url);
+  const safe = (label, fn) => (...a) => {
+    try { fn(...a); } catch (e) { report(label, e); }
     refresh();
-  });
-  ipcMain.on('add', (_, raw) => {
+  };
+  ipcMain.on('toggle', safe('Could not open site', (_, id) => {
+    open.has(id) ? closeSite(id) : openSite(id, SITES[id].name, SITES[id].url);
+  }));
+  ipcMain.on('add', safe('Could not open address', (_, raw) => {
     let url = String(raw || '').trim();
     if (!url) return;
     if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
-    try { openSite('c' + Date.now(), new URL(url).hostname.replace(/^www\./, ''), url); } catch { return; }
-    refresh();
-  });
+    openSite('c' + Date.now(), new URL(url).hostname.replace(/^www\./, ''), url);
+  }));
   ipcMain.on('fit', () => { fit = !fit; refresh(); });
   ipcMain.on('scale', (_, v) => { scale = Math.min(2, Math.max(0.5, Number(v) || 1)); autoFit(); });
   ipcMain.on('itemScale', (_, v) => {
@@ -225,8 +237,8 @@ app.whenReady().then(() => {
     win.webContents.send('toast', 'No video found for Picture-in-Picture');
   });
   ipcMain.on('mode', (_, m) => { mode = m; refresh(); });
-  ipcMain.on('activate', (_, id) => { active = id; refresh(); });
-  ipcMain.on('close', (_, id) => { closeSite(id); refresh(); });
+  ipcMain.on('activate', safe('Switch failed', (_, id) => { active = id; }));
+  ipcMain.on('close', safe('Close failed', (_, id) => { closeSite(id); }));
 
   initAdblock();
 });
